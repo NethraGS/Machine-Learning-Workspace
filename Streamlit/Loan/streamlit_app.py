@@ -63,6 +63,9 @@ def save_to_db(data, prediction):
     ))
     conn.commit()
 
+def load_db_data():
+    return pd.read_sql("SELECT * FROM loan_predictions", conn)
+
 # ================= LOAD MODEL =================
 @st.cache_resource
 def load_model():
@@ -70,7 +73,7 @@ def load_model():
 
 model = load_model()
 
-# ================= LOAD DATA =================
+# ================= LOAD CSV DATA =================
 @st.cache_data
 def load_data():
     return pd.read_csv("Loan.csv")
@@ -81,11 +84,16 @@ df = load_data()
 st.sidebar.header("📌 Menu")
 menu = st.sidebar.radio(
     "Select Option",
-    ["📊 View Loan Data", "🔍 Search Loan by ID", "🤖 Predict Loan Approval"]
+    [
+        "📊 View Loan Data",
+        "🔍 Search Loan by ID",
+        "🤖 Predict Loan Approval",
+        "📈 DB Analytics"
+    ]
 )
 
 # =====================================================
-# 📊 VIEW LOAN DATA
+# 📊 VIEW LOAN DATA (CSV)
 # =====================================================
 if menu == "📊 View Loan Data":
 
@@ -97,15 +105,11 @@ if menu == "📊 View Loan Data":
     col3.metric("Missing Values", df.isnull().sum().sum())
 
     st.subheader("🎨 Loan Records (First 100 Rows)")
-
-    styled_df = (
+    st.dataframe(
         df.head(100)
-        .style
-        .background_gradient(cmap="viridis")
-        .set_properties(**{"border": "1px solid white"})
+        .style.background_gradient(cmap="viridis"),
+        use_container_width=True
     )
-
-    st.dataframe(styled_df, use_container_width=True)
 
     st.subheader("📈 Loan Status Distribution")
     st.bar_chart(df["Loan_Status"].value_counts())
@@ -116,7 +120,6 @@ if menu == "📊 View Loan Data":
 elif menu == "🔍 Search Loan by ID":
 
     st.subheader("🔍 Find Loan Details")
-
     loan_id = st.text_input("Enter Loan ID")
 
     if st.button("Search"):
@@ -139,7 +142,6 @@ elif menu == "🤖 Predict Loan Approval":
     st.subheader("🤖 Loan Approval Prediction")
 
     with st.form("loan_form"):
-
         col1, col2 = st.columns(2)
 
         with col1:
@@ -180,26 +182,92 @@ elif menu == "🤖 Predict Loan Approval":
         prediction = model.predict(input_df)[0]
         result_text = "Loan Approved" if prediction == 1 else "Loan Rejected"
 
-        # 🔐 SAVE TO SQLITE
         save_to_db(input_data, result_text)
 
-        # 🎉💔 RESULT UI
         if prediction == 1:
             st.balloons()
-            st.toast("Loan Approved 🎉", icon="✅")
-            st.success("🎉 Congratulations! Your Loan is Approved")
+            st.success("🎉 Loan Approved")
         else:
-            st.toast("Loan Rejected 💔", icon="❌")
             st.snow()
-            st.error("💔 Sorry! Your Loan is Rejected")
+            st.error("💔 Loan Rejected")
 
-        st.subheader("📥 Submitted Data")
         st.dataframe(
             input_df.assign(Prediction=result_text)
             .style.background_gradient(cmap="coolwarm"),
             use_container_width=True
         )
 
+# =====================================================
+# 📈 DB ANALYTICS
+# =====================================================
+elif menu == "📈 DB Analytics":
+
+    st.subheader("📈 Loan Analytics")
+
+    db_df = load_db_data()
+
+    if db_df.empty:
+        st.warning("No prediction records found.")
+    else:
+        # ================= METRICS =================
+        approved = (db_df["Prediction"] == "Loan Approved").sum()
+        rejected = (db_df["Prediction"] == "Loan Rejected").sum()
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total", len(db_df))
+        m2.metric("Approved", approved)
+        m3.metric("Rejected", rejected)
+
+        st.divider()
+
+        # ================= ROW 1 =================
+        c1, c2 = st.columns(2)
+
+        with c1:
+            st.caption("Approval Ratio")
+            pie = db_df["Prediction"].value_counts()
+            st.pyplot(pie.plot.pie(
+                autopct="%1.0f%%",
+                ylabel=""
+            ).figure)
+
+        with c2:
+            st.caption("Credit History Impact")
+            credit = pd.crosstab(db_df["Credit_History"], db_df["Prediction"])
+            st.bar_chart(credit)
+
+        # ================= ROW 2 =================
+        c3, c4 = st.columns(2)
+
+        with c3:
+            st.caption("Gender-wise Outcome")
+            gender = pd.crosstab(db_df["Gender"], db_df["Prediction"])
+            st.bar_chart(gender)
+
+        with c4:
+            st.caption("Property Area")
+            area = pd.crosstab(db_df["Property_Area"], db_df["Prediction"])
+            st.bar_chart(area)
+
+        # ================= ROW 3 =================
+        st.caption("Income vs Loan Amount")
+        st.scatter_chart(
+            db_df,
+            x="ApplicantIncome",
+            y="LoanAmount",
+            size="LoanAmount",
+            color="Prediction"
+        )
+
+        # ================= DATA (HIDDEN) =================
+        with st.expander("🗄️ View Records"):
+            st.dataframe(
+                db_df.sort_values("Timestamp", ascending=False)
+                .style.background_gradient(cmap="Blues"),
+                use_container_width=True
+            )
+
+
 # ================= FOOTER =================
 st.markdown("---")
-st.markdown("🚀 Built with **Streamlit + Machine Learning + SQLite**")
+st.markdown("🚀 Built with **Streamlit + Machine Learning + SQLite Analytics**")
