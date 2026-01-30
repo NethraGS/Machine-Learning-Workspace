@@ -95,8 +95,29 @@ def recommend_songs(song: SongInput, top_n: int = 5):
 
     data = pd.DataFrame([song.dict()])
     cluster = int(model.predict(data)[0])
+    cluster_name = cluster_names.get(cluster, "Unknown")
 
-    songs_df = get_songs_df()  # lazy load here
+    # ✅ SAVE TO DB HERE
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO predictions
+        (danceability, energy, valence, tempo, duration_ms, popularity, cluster, cluster_name)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        song.danceability,
+        song.energy,
+        song.valence,
+        song.tempo,
+        song.duration_ms,
+        song.popularity,
+        cluster,
+        cluster_name
+    ))
+    conn.commit()
+    conn.close()
+
+    songs_df = get_songs_df()
 
     recommendations = (
         songs_df[songs_df["cluster"] == cluster]
@@ -106,9 +127,10 @@ def recommend_songs(song: SongInput, top_n: int = 5):
 
     return {
         "cluster": cluster,
-        "cluster_name": cluster_names.get(cluster),
+        "cluster_name": cluster_name,
         "recommendations": recommendations.to_dict(orient="records")
     }
+
 
 # ---------------- HISTORY ----------------
 @app.get("/history")
